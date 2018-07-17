@@ -1,0 +1,8 @@
+---
+- name: Wait till we start with the next server
+  pause:
+    minutes: "{{ (wait_seconds_between_servers|int / 60)|int|abs }}" 
+  when: 
+    - groups['all'][-1] != inventory_hostname
+    - not ansible_check_mode
+    # skip when we are the last node in the inventory

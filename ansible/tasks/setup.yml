@@ -1,0 +1,13 @@
+---
+# Installs all requirements as described in README
+- hosts: localhost
+  tasks:
+    - name: Install required packages
+      yum:
+        name: "{{ item }}"
+        state: installed
+     with_items:
+       - at
+       - bc
+       - atomic-openshift-clients
+       - mailx

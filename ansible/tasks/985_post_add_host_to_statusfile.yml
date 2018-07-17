@@ -1,0 +1,8 @@
+---
+- lineinfile:
+    path: "{{ playbook_dir }}/logs/statusfile"
+    line: "{{ inventory_hostname }} {{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+    create: yes
+  check_mode: no
+  become: false
+  delegate_to: localhost

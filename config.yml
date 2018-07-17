@@ -1,0 +1,15 @@
+---
+patch_window_start: '01:00:00'
+patch_window_end: '04:00:00'
+servers_per_patch_run: 4
+wait_seconds_between_servers: 300
+servers_in_parallel: 1
+server_list: server.list
+data_dir:
+patch_days: # 1 - 7, 1=Monday, 7=Sunday
+  - 1 # Monday
+  - 2 # Tuesday
+  - 3 # Wednesday
+  - 4 # Thursday
+  - 5 # Friday
+force_reboot: false

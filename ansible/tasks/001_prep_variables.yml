@@ -1,0 +1,116 @@
+---
+# Check if mydate is set
+- name: "Check and set mydate variable"
+  set_fact:
+    mydate: "{{ mydate | default( ansible_date_time['date'] ) }}"
+
+# Check if patch_window_start is set
+- name: "Check patch_window_start variable"
+  set_fact:
+    patch_window_start: "{{ patch_window_start | default('00:00:00') }}" 
+
+# Check if patch_window_end is set
+- name: "Check patch_window_end variable"
+  set_fact:
+    patch_window_end: "{{ patch_window_end | default('23:59:59') }}"
+
+# We have multiple providers like aws, tss, swisscom. Add your own or ignore these facts
+- name: "Init the facts"
+  set_fact:
+    ok: false
+    etcd: false
+    master: false
+    node: false
+    gluster: false
+    tss: false
+    aws: false
+    awsprod: false
+    awsdev: false
+    swisscom: false
+    location: ""
+    firstmaster: false
+
+- name: "Check if server is AWS"
+  command: grep 'amazon' /sys/devices/virtual/dmi/id/bios_version
+  changed_when: no
+  check_mode: no
+  ignore_errors: yes
+  register: aws_result
+
+- name: "Evaluate if dev cluster"
+  shell: hostname -s | grep dev
+  changed_when: no
+  check_mode: no
+  failed_when: no
+  register: dev_result
+
+- name: "Set fact if node is AWS-Dev"
+  set_fact:
+    awsdev: true
+    aws: true # shortcut for future when conditions
+    location: awsdev
+  when: aws_result.stdout.find('amazon') != -1 and dev_result.rc == 0
+
+- name: "Set fact if node is AWS-Prod"
+  set_fact:
+    aws: true
+    awsprod: true
+    location: awsprod
+  when: aws_result.stdout.find('amazon') != -1 and dev_result.rc != 0
+
+- name: "Set fact if node is VIAS-Prod"
+  set_fact:
+    tss: true
+    location: tss
+  when: aws_result.stdout.find('amazon') == -1
+
+- name: "Set fact if node is Swisscom"
+  set_fact:
+    swisscom: true
+    location: swisscom
+  when: not true # Will be changed when we know how
+
+- name: "Add host to group based on location"
+  group_by:
+    key: iaas_{{ location|lower }}
+
+# Check if the node is at least in one of the possible group vars
+- name: "Check if this node is or will be a etcd node"
+  set_fact:
+    etcd: true
+  when: "'etcd' in group_names"
+
+- name: "Check if this node is or will be a ose-node"
+  set_fact:
+    ok: true
+    node: true
+    purpose: node
+  when: "'nodes' in group_names"
+
+# Master must be after node, because masters are also nodes
+- name: "Check if this node is or will be a master"
+  set_fact:
+    ok: true
+    master: true
+    purpose: master
+  when: "'masters' in group_names"
+
+- name: "Check if this node is or will be a gluster-server"
+  set_fact:
+    ok: true
+    gluster: true
+    purpose: gluster
+  when: "'gluster' in group_names"
+
+- name: "Abort if the server is not in at least in one group"
+  fail: msg="Each server has to be in a group masters/nodes/gluster, even if you scale it up and he is in new_nodes"
+  when: not ok
+
+- name: "Create groups based on location and purpose"
+  group_by:
+    key: iaas_{{ location|lower }}_{{ purpose }}
+    parents: iaas_{{ location|lower }}
+
+- name: "Display the servers that will be affected"
+  command: /bin/true
+  changed_when: false

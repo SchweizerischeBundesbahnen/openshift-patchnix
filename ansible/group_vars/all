@@ -1,0 +1,16 @@
+---
+###### Repository management (patchserver satnix)
+patchserver_ip_address: 10.10.0.100
+
+###### Mail settings
+mailserver: smtp-app.foob.bar
+mail_from: "<sender@foo.bar> (Foo Bar)"
+mail_recipients:
+  - wantsmails@boo.bar
+
+###### rocketchat settings
+rocketchat_token: xxxxxxxxxxxxxxxxxxx
+rocketchat_domain: chat.foo.bar
+rocketchat_channel: '#foobar'
+rocketchat_username: 'foouser'
+

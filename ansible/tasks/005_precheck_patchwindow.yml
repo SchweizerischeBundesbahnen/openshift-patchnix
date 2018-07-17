@@ -1,0 +1,69 @@
+---
+#  Description:
+#
+#  ansible_date_time['epoch'] <--- is not current, so we use date +%s
+#  {{ lookup('pipe', 'date +%s') }}
+#
+#  We use the following variables:
+#  mydate
+#  patch_window_start
+#  patch_window_end
+#  
+#  And create the following variables:
+#  patch_window_start_epoch = {{ ((mydate + ' ' +  patch_window_start) | to_datetime ).strftime('%s')
+#  patch_window_end_epoch   = {{ ((mydate + ' ' +  patch_window_end) | to_datetime ).strftime('%s')
+#
+#  Here is the logic:
+#  if patch_window_start_epoch > patch_window_end_epoch
+#      end is before start, like start at 22:00 and end is 04:00, we have to add a day to the end date
+#      patch_window_end_epoch += (24 * 3600)
+#  end
+#  if lookup('pipe', 'date +%s') < patch_window_start_epoch
+#      we are too early with out patching, abort!
+#  end
+#  if lookup('pipe', 'date +%s') > patch_window_end_epoch
+#      we ar too late for patching, already out of the patching window!
+#  end
+- block:
+  - name: Calculate patch_window_start_epoch
+    shell: "echo {{ ((mydate + ' ' +  patch_window_start) | to_datetime ).strftime('%s') }}"
+    register: patch_window_start_epoch
+    changed_when: false
+    check_mode: false
+
+  - name: Calculate patch_window_end_epoch
+    set_fact: 
+      patch_window_end_epoch: "{{ ((mydate + ' ' +  patch_window_end) | to_datetime ).strftime('%s') }}"
+    changed_when: false
+    check_mode: false
+
+  - name: Check if the patchwindow stretches over more than one day (over midnight) Part 1
+    set_fact:
+      patch_window_end_epoch_tmp: "{{ (patch_window_end_epoch | int) + 86400 }}"
+    changed_when: false
+    check_mode: false
+    when: ( patch_window_start_epoch.stdout | int ) > ( patch_window_end_epoch | int )
+
+  - name: Check if the patchwindow stretches over more than one day (over midnight) Part 2
+    set_fact:
+      patch_window_end_epoch: "{{ patch_window_end_epoch_tmp }}"
+    changed_when: false
+    check_mode: false
+    when: ( patch_window_start_epoch.stdout | int ) > ( patch_window_end_epoch | int )
+
+  - debug:
+      msg: "{{ '%Y-%m-%d %H:%M:%S' | strftime(patch_window_start_epoch.stdout) }} {{ '%Y-%m-%d %H:%M:%S' | strftime(patch_window_end_epoch) }} {{ '%Y-%m-%d %H:%M:%S' | strftime(lookup('pipe', 'date +%s') | int) }}"
+
+  - name: Check if we are before the patchwindow
+    shell: "echo if {{ ( lookup('pipe', 'date +%s') | int ) < ( patch_window_start_epoch.stdout | int ) }} then we are before the patch window"
+    changed_when: false
+    check_mode: false
+    failed_when: ( lookup('pipe', 'date +%s') | int ) < ( patch_window_start_epoch.stdout | int )
+
+  - name: Check if we are after the patchwindow
+    shell: "echo if {{ ( lookup('pipe', 'date +%s') | int ) > ( patch_window_end_epoch | int ) }} then we are after the patch window"
+    changed_when: false
+    check_mode: false
+    failed_when: ( lookup('pipe', 'date +%s') | int ) > ( patch_window_end_epoch | int )
+
+  delegate_to: localhost

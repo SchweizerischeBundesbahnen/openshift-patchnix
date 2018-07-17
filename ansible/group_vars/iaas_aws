@@ -1,0 +1,64 @@
+---
+###### Repository management (patchserver satnix)
+rhel7_repositories:
+  #
+  ## Base repositories: Base packages and lots of additional packages
+  #
+  - name: stable/rhel7-server-x86_64/os
+    enabled: true
+  - name: stable/rhel7-server-x86_64/optional
+    enabled: true
+  #
+  ## Extras repositoriy: ansible, docker, cockpit, etcd, kubernetes
+  #
+  - name: stable/rhel7-server-x86_64/extras
+    enabled: true
+  #
+  ## Red Hat Software Collection: newer versions of cool packages
+  #
+  - name: stable/rhel7-server-x86_64/rhscl
+    enabled: false
+  #
+  ## OpenShift repositories
+  #
+  - name: stable/rhel7-server-x86_64/ose/3.6/os
+    enabled: true
+  - name: stable/rhel7-server-x86_64/ose/3.7/os
+    enabled: false
+  - name: stable/rhel7-server-x86_64/ose/3.9/os
+    enabled: false
+  - name: stable/rhel7-server-x86_64/ose/3.10/os
+    enabled: false
+  #
+  ## Fast datapath repository:
+  #
+  - name: stable/rhel7-server-x86_64/fast-datapath
+    enabled: true
+  #
+  ## Red Hat Storage Native Client (glusterfs client)
+  #
+  - name: stable/rhel7-server-x86_64/rhs-client/os
+    enabled: true
+  #
+  ## Gluster repositories
+  #
+  - name: stable/rhel7-server-x86_64/gluster/3.1/os
+    enabled: false
+  - name: stable/rhel7-server-x86_64/gluster/3.2/os
+    enabled: false
+  #
+  ## Linux-HA repositories
+  #
+  - name: stable/rhel7-server-x86_64/highavailability
+    enabled: false
+  #
+  ## EPEL repository
+  #
+  - name: stable/rhel7-server-x86_64/epel
+    enabled: true
+  #
+  ## New-Relic repository
+  #
+  - name: stable/rhel7-server-x86_64/new-relic
+    enabled: true
+

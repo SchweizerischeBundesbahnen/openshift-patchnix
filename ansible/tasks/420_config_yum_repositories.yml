@@ -1,0 +1,82 @@
+---
+- name: Add own hostname to hosts file
+  lineinfile:
+   dest: /etc/hosts
+   state: present
+   line: '{{ ansible_default_ipv4.address }} {{ inventory_hostname }}'
+  when: aws
+
+- name: Add additional repository gpg keys to /etc/pki/rpm-gpg
+  copy:
+    src: "files/{{ item }}"
+    dest: /etc/pki/rpm-gpg
+    owner: root
+    group: root
+    mode: 0644
+  with_items:
+    - RPM-GPG-KEY-epel-7
+    - RPM-GPG-KEY-newrelic
+
+- name: Add additional pgp keys to rpm database
+  rpm_key:
+    state: present
+    key: /etc/pki/rpm-gpg/{{ item }}
+  with_items:
+    - RPM-GPG-KEY-epel-7
+    - RPM-GPG-KEY-newrelic
+  ignore_errors: true
+  
+- name: Remove rhn
+  yum: 
+    name: rhnsd
+    state: removed
+
+- name: Remove package rh-amazon-rhui-client
+  yum:
+    name: rh-amazon-rhui-client
+    state: removed
+
+- name: Remove /etc/yum.repos.d/redhat.repo
+  file:
+    path: /etc/yum.repos.d/redhat.repo
+    state: absent
+
+- name: Disable unneeded yum plugins
+  lineinfile:
+    path: /etc/yum/pluginconf.d/{{ item }}
+    regexp: '^enabled='
+    line: 'enabled=0'
+  with_items:
+    - enabled_repos_upload.conf
+    - package_upload.conf
+    - subscription-manager.conf
+  ignore_errors: true
+
+- name: Find rpmsave files in /etc/yum.repos.d/
+  find:
+    paths: /etc/yum.repos.d/
+    patterns: '*.rpmsave'
+  register: files_to_delete
+
+- name: Remove /etc/yum.repos.d/*.rpmsave
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  with_items:
+    - "{{ files_to_delete.files }}"
+
+- name: Configure yum repositories
+  yum_repository:
+    # we remove stable,testing or date from the name and replace all '/' with '-'
+    name: "{{ item.name | replace('/', '-') | regex_replace('^(?P<patch_branch>[^-]+)-(?P<rest>.+)$', '\\g<rest>')  }}"
+    # we don't need 'rhel7-server-x86_64' in the description, so we remove it
+    description: "RHEL7 Repository - {{ item.name | replace('rhel7-server-x86_64/', '') }}"
+    file: rhel7_repos
+    baseurl: "http://{{ patchserver_ip_address }}/distributor/{{ item.name }}"
+    enabled: "{{ item.enabled }}"
+    gpgcheck: yes
+  with_items: "{{ rhel7_repositories }}"
+  tags:
+    - yum
+    - repo
+  notify: yum-clean-metadata

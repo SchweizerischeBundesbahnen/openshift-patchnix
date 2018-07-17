@@ -1,0 +1,7 @@
+---
+- name: YUM Update all os packages
+  yum:
+    name: '*'
+    state: latest
+    disablerepo: '*'
+    enablerepo: rhel7-server-x86_64-os,rhel7-server-x86_64-extras,rhel7-server-x86_64-optional

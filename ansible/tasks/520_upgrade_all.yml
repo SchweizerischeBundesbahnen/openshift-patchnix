@@ -1,0 +1,18 @@
+---
+- name: Run atomic-openshift-docker-excluder
+  shell: atomic-openshift-docker-excluder exclude
+
+- name: Run atomic-openshift-excluder
+  shell: atomic-openshift-excluder unexclude
+
+- name: YUM Update all packages
+  yum:
+    name: '*'
+    state: latest
+
+- name: Run atomic-openshift-docker-excluder
+  shell: atomic-openshift-excluder exclude
+
+- name: Run atomic-openshift-excluder
+  shell: atomic-openshift-excluder exclude
+

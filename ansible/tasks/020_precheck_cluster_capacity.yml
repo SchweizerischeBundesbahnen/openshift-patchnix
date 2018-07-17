@@ -1,0 +1,9 @@
+---
+- name: Check cluster capacity (pods)
+  shell: /root/bin/get_pods_per_node_capacity.sh # returns pod softlimit
+  register: capacity
+  failed_when: capacity.stdout | int < 0 # not enough capacity when we receive a negative result
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  become: true

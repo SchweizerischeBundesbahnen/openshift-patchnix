@@ -1,0 +1,13 @@
+---
+- name: Set default systemd startup timeout to 5 minutes
+  lineinfile:
+    path: /etc/systemd/system.conf
+    line: 'DefaultTimeoutStartSec=300s'
+    regexp: 'DefaultTimeoutStartSec='
+
+- name: Set default systemd stop timeout to 5 minutes
+  lineinfile:
+    path: /etc/systemd/system.conf
+    line: 'DefaultTimeoutStopSec=300s'
+    regexp: 'DefaultTimeoutStopSec='
+

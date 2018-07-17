@@ -1,0 +1,34 @@
+---
+- name: Wait for docker.service to be available again
+  shell: /bin/systemctl status docker.service
+  register: docker_result
+  until: docker_result.rc == 0
+  retries: 30
+  delay: 10
+  check_mode: false
+  changed_when: false
+
+- name: Wait for atomic-openshift-node.service to be available again
+  shell: /bin/systemctl status atomic-openshift-node.service
+  register: atomic_result
+  until: atomic_result.rc == 0
+  retries: 30
+  delay: 10
+  check_mode: false
+  changed_when: false
+
+- name: Wait for node to be ready from the masters' point of view
+  shell: oc get node {{ inventory_hostname }} --no-headers=true
+  register: node_ready
+  until: node_ready.stdout.find("Ready") # devnode01a.ose.foo-aws.net   Ready     19d
+  retries: 30
+  delay: 15
+  delegate_to: localhost
+  connection: local
+  check_mode: false
+  become: true
+  changed_when: false
+
+
+
+

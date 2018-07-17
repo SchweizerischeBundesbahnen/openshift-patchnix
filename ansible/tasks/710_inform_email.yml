@@ -1,0 +1,13 @@
+---
+- name: Send notification mail
+  mail:
+    host: "{{ mailserver }}"
+    subject: OpenShift Cluster Maintenance End
+    body: |
+      The following server has been processed successfully: {{ inventory_hostname }}
+      
+      This message is generated automatically.
+    from: "{{ mail_from }}"
+    to: "{{ mail_recipients | join(', ') }}"
+    charset: utf8
+  delegate_to: localhost

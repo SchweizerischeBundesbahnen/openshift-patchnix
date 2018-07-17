@@ -1,0 +1,8 @@
+---
+- name: Schedule node {{ inventory_hostname }}
+  shell: oc adm manage-node {{ inventory_hostname }} --schedulable=true
+  delegate_to: localhost
+  connection: local
+  become: true
+
+

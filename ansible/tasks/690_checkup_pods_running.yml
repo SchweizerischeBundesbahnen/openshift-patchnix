@@ -1,0 +1,8 @@
+---
+#- block
+#  - name: todo 
+#    shell: todo 
+#  delegate_to: localhost
+#  connection: local
+#  become: true
+

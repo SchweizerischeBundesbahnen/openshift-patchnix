@@ -1,0 +1,13 @@
+---
+- name: Wait for host to be available again
+  wait_for:
+    host: "{{ inventory_hostname }}"
+    port: 22
+    search_regex: OpenSSH
+    state: started
+    delay: 30
+    timeout: 600
+  become: false
+  when: reboot_hint.rc != 0 or reboot_required=='true'
+  delegate_to: localhost
+  connection: local

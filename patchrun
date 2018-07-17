@@ -1,0 +1,431 @@
+#!/usr/bin/env ruby
+#
+# Purpose: Schedules ansible runs to maintain OpenShift clusters
+# Author:  Lukas Reusser
+# Created: 2018.02.28
+#
+
+require 'optparse'
+require 'yaml'
+require 'pp'
+require 'date'
+require 'fileutils'
+require 'time'
+
+$input_options = ARGV
+ARGV << '-h' if ARGV.empty?
+ARGV << '-h' if ! ['create', 'list', 'info', 'delete', 'status'].include? ARGV[0]
+option = ARGV[0]
+
+options = {}
+OptionParser.new do |opts|
+
+  opts.banner = "Usage: patchrun create|list|info|delete [options]"
+
+  opts.on('-p', '--patchrun_name <STRING>', "Patchrun name, e.g.: 'kernel-fix' Without whitespaces! (default: empty)") { |v| options[:patchrun_name] = v }
+  opts.on('-t', '--start_date <DATE>', 'Start of the patchrun, e.g.: 2018.02.20 (default: today)') { |v| options[:start_date] = v }
+  opts.on('-s', '--patch_window_start <TIME>', 'Start of the patch window, e.g.: 00:15:00') { |v| options[:patch_window_start] = v }
+  opts.on('-e', '--patch_window_end <TIME>', 'End of the patch window, e.g.: 04:30:00') { |v| options[:patch_window_end] = v }
+  opts.on('-n', '--servers_per_patch_run <INTEGER>', 'How many server to patch in one run. 0=max') { |v| options[:servers_per_patch_run] = v.to_i }
+  opts.on('-r', '--servers_in_parallel <INTEGER>', 'How many server to patch in parallel. Default: 1') { |v| options[:servers_in_parallel] = v.to_i }
+  opts.on('-w', '--wait_seconds_between_servers <SECONDS>', 'How long to wait after a server is patched till we start the next') { |v| options[:wait_seconds_between_servers] = v.to_i }
+  opts.on('-l', '--server_list <FILE>', 'File with list of servers to patch') { |v| options[:server_list] = v }
+  opts.on('-i', '--include_tasks <STRING>', 'Comma separated list of tasks to run (in ansible/tasks/*.yml)') { |v| options[:include_tasks] = v }
+  opts.on('-x', '--exclude_tasks <STRING>', 'Comma separated list of tasks to exclude (in ansible/tasks/*.yml)') { |v| options[:exclude_tasks] = v }
+  opts.on('-a', '--data_dir <DIRECTORY>', 'Directory where we put all patchrun information') { |v| options[:data_dir] = v }
+  opts.on('-f', '--force_reboot', 'Force reboot of nodes even if not required') { |v| options[:force_reboot] = v }
+  opts.on('-c', '--check', 'Run ansible in check mode') { |v| options[:check] = v }
+  opts.on('-v', '--[no-]verbose', 'Run verbosely') { |v| options[:verbose] = v }
+  opts.on('-d', '--[no-]debug', 'Run in debug mode') { |v| options[:debug] = v }
+
+end.parse!
+
+$basedir = File.dirname(File.expand_path $0 ) # Get our basedir
+puts "DEBUG: basedir: '#{$basedir}'" if options[:debug]
+
+# Read config file
+$config = {} # Globla variable, holds general config values
+$config = YAML.load_file("#{$basedir}/config.yml")
+
+### config file content
+# patch_window_start: '00:15:00'
+# patch_window_end: '04:30:00'
+# servers_per_patch_run: 2
+# wait_seconds_between_servers: 300
+# servers_in_parallel: 1
+# server_list: server.list
+# data_dir:
+# patch_days: # 1 - 7, 1=Monday, 7=Sunday
+#   - 2 # Tuesday
+#   - 3 # Wednesday
+#   - 4 # Thursday
+#   - 5 # Friday
+# force_reboot: false
+
+if options[:debug]
+  # set verbose if debug is set
+  options[:verbose] = true
+  puts "DEBUG: Config from configfile:"
+  pp $config
+  puts "DEBUG: Commandline options:"
+  pp options
+end
+
+options.each do | name, value |
+  puts "DEBUG: option: #{name} -> '#{value}' (class: #{value.class})" if options[:debug]
+  # check if input is valid (true|false|Integer|RE)
+  if value.to_s =~ /\A[a-z0-9\/\.:_-]+\Z/i
+    puts "INFO: Input validation OK" if options[:verbose]
+  else
+    puts "WARN: Invalid characters detected in '#{value}'. Allowed is: a-z, A-Z, 0-9, -_:./"
+    exit 1
+  end
+  puts "INFO: Overwriting config value '#{name}' with provided param '#{value}'" if options[:verbose]
+  $config["#{name}"] = value
+end
+
+if options[:debug]
+  puts "Final config:"
+  pp $config
+end
+
+# Define and create data directory
+$data_dir = "#{$basedir}/patchrun_data" # default data dir
+$data_dir = $config['data_dir'] if ! $config.has_key?('data_dir')
+
+if ! Dir.exists?($data_dir)
+  puts "DEBUG: Directory #{$data_dir} does not exist. Creating it .." if options[:debug]
+  FileUtils.mkdir_p($data_dir)
+end
+
+#------------------------------------------------------------------------------
+def schedule_patchjob(mydate, servers, patchrun_data_dir)
+  if $config['debug']
+    puts "DEBUG: Function schedule_patchjob arguments: mydate=>'#{mydate}', servers=>#{servers}"
+    puts "patch_window_start=>#{$config['patch_window_start']}"
+    puts "patch_window_end=>#{$config['patch_window_end']}"
+    puts "wait_seconds_between_servers=>#{$config['wait_seconds_between_servers']}"
+    puts "servers_in_parallel: =>#{$config['servers_in_parallel']}"
+  end
+
+  # ansible-playbook test.yml --extra-vars "mydate=2018-03-01 patch_window_start=00:30:00 patch_window_end=04:30:00 wait_seconds_between_servers=300 servers_in_parallel=1" -l server1,server2,server3 -v --check
+  at_job_command = "/usr/bin/ansible-playbook site.yml"
+  at_job_command += " --extra-vars 'mydate=#{mydate}"
+  at_job_command += " patch_window_start=#{$config['patch_window_start']}"
+  at_job_command += " patch_window_end=#{$config['patch_window_end']}"
+  at_job_command += " wait_seconds_between_servers=#{$config['wait_seconds_between_servers']}"
+  at_job_command += " servers_in_parallel=#{$config['servers_in_parallel']}"
+  at_job_command += " force_reboot=#{$config['force_reboot']}'"
+  at_job_command += " --limit=#{servers.join(',')}"
+  at_job_command += " --check" if $config['check']
+
+  puts "INFO: at command: '#{at_job_command}'" if $config['debug']
+  cmd_output = %x( cd "#{patchrun_data_dir}" && at "#{$config['patch_window_start'][0...-3]} #{mydate}" -- <<< "#{at_job_command}" )
+  puts "INFO: #{cmd_output}" if ! cmd_output.empty? && $config['verbose']
+
+end
+
+#------------------------------------------------------------------------------
+# patchrun_create
+def patchrun_create(options)
+
+  # How does include and exclude work?
+  # We read all tasks from the ansible/site.yml file in a hash. The filename is the key.
+  # Then we add the included tasks to the hash and remove the excluded tasks from the hash.
+  # As we use the filename as the key, no duplicates are possible.
+  # Finally, we sort the keys and write all tasks to the new site.yml file.
+  site_yml = YAML.load_file("#{$basedir}/ansible/site.yml")
+  # [{"hosts"=>"all",
+  # "serial"=>1,
+  # "become"=>true,
+  # "tasks"=>
+  #  [{"include_tasks"=>"tasks/001_prep_variables.yml"},
+  #   {"include_tasks"=>"tasks/005_precheck_patchwindow.yml"},
+  #   {"include_tasks"=>"tasks/010_precheck_cluster_status.yml"},
+  #   {"include_tasks"=>"tasks/020_precheck_cluster_capacity.yml"},
+  #   {"include_tasks"=>"tasks/110_inform_email.yml"},
+  #   {"include_tasks"=>"tasks/310_maintenance_unschedule_evacuate_node.yml"},
+  #   {"include_tasks"=>"tasks/410_config_changes.yml"},
+  #   {"include_tasks"=>"tasks/420_config_yum_repositories.yml"},
+  #   {"include_tasks"=>"tasks/520_upgrade_all.yml"},
+  #   {"include_tasks"=>"tasks/599_reboot.yml"},
+  #   {"include_tasks"=>"tasks/600_checkup_server_up.yml"},
+  #   {"include_tasks"=>"tasks/610_checkup_services_up.yml"},
+  #   {"include_tasks"=>"tasks/680_checkup_schedule_node.yml"},
+  #   {"include_tasks"=>"tasks/710_inform_email.yml"},
+  #   {"include_tasks"=>"tasks/990_post_wait.yml"}],
+  # "handlers"=>[{"import_tasks"=>"handlers/main.yml"}]}]
+
+  tasks = site_yml[0]['tasks']
+  tasklist = {}
+  tasks.each do | task |
+    puts "DEBUG: #{task['include_tasks'].split('/')[1]}" if options[:debug]
+    tasklist["#{task['include_tasks'].split('/')[1]}"] = 1
+  end
+
+  # Check if include tasks is set and if the tasks do exist
+  if $config.has_key? 'include_tasks'
+    $config['include_tasks'].split(',').each do | taskname |
+      if File.file?("#{$basedir}/ansible/tasks/#{taskname}")
+        puts "DEBUG: Adding taskname: '#{taskname}'" if options[:debug]
+        tasklist["#{taskname}"] = 1
+      else
+        puts "ERROR: Taskfile '#{$basedir}/ansible/tasks/#{taskname}' does not exist!"
+        exit 1
+      end
+    end
+  end
+
+  # Check if exclude tasks are set
+  if $config.has_key? 'exclude_tasks'
+    $config['exclude_tasks'].split(',').each do | taskname |
+      puts "DEBUG: Removing taskname: '#{taskname}'" if options[:debug]
+      tasklist.delete("#{taskname}")
+    end
+  end
+
+  # tasklist holds the final tasks
+  if options[:verbose]
+    puts "INFO: Final tasklist:"
+    pp tasklist.sort
+  end
+  # [["001_prep_variables.yml", 1],
+  # ["005_precheck_patchwindow.yml", 1],
+  # ["010_precheck_cluster_status.yml", 1],
+  # ["020_precheck_cluster_capacity.yml", 1],
+  # ["110_inform_email.yml", 1],
+  # ["310_maintenance_unschedule_evacuate_node.yml", 1],
+  # ["410_config_changes.yml", 1],
+  # ["420_config_yum_repositories.yml", 1],
+  # ["520_upgrade_all.yml", 1],
+  # ["600_checkup_server_up.yml", 1],
+  # ["610_checkup_services_up.yml", 1],
+  # ["630_checkup_logfiles.yml", 1],
+  # ["680_checkup_schedule_node.yml", 1],
+  # ["710_inform_email.yml", 1],
+  # ["990_post_wait.yml", 1]]
+
+  # bring it back in the right format to store it in the site.yml file
+  include_tasks = []
+  tasklist.sort.each_with_index do | (key, value), index |
+    include_tasks[index]= {'include_tasks' => "tasks/#{key}" }
+  end
+  site_yml[0]['tasks'] = include_tasks # overwrite tasks in site_yml
+
+  if options[:debug]
+    puts "DEBUG: include_tasks:"
+    pp include_tasks
+  end
+
+  mydate = Date.today
+  puts "DEBUG: mydate: #{mydate}" if options[:debug]
+  if options.has_key? :start_date
+    mydate = Date.parse(options[:start_date])
+    puts "INFO: Overwritting start_date with '#{mydate}'"
+  end
+
+  # Check if start_date is today and patch_window_start is already over.
+  # In this case, we add a day to the start_date because at can't schedule a job in the past
+  # "at: refusing to create job destined in the past"
+  if Date.today.strftime("%Y-%m-%d").to_s == mydate.strftime("%Y-%m-%d").to_s && DateTime.now > DateTime.parse($config['patch_window_start'])
+    puts "INFO: Adding one day to our start date because the patch_window_start is already over today" if options[:verbose]
+    mydate += 1 # add a day
+  end
+
+  patchrun_name_final  = mydate.to_s
+  patchrun_name_final += '-' + $config['patchrun_name'] if $config.has_key?('patchrun_name') and ! $config['patchrun_name'].nil?
+
+  puts "DEBUG: patchrun_name: '#{$config['patchrun_name']}'" if options[:debug]
+  patchrun_data_dir  = $data_dir + '/' + patchrun_name_final
+  puts "DEBUG: patchrun_data_dir: '#{patchrun_data_dir}'" if options[:debug]
+
+  # We create a directory per patchrun
+  if Dir.exists?(patchrun_data_dir)
+    puts "WARN: This patchrun already exists! See directory #{patchrun_data_dir}"
+    exit 1
+  else
+    FileUtils.mkdir_p(patchrun_data_dir)
+  end
+
+  # Copy entire ansible directory to patchrun directory
+  FileUtils.cp_r Dir.glob("#{$basedir}/ansible/*"), "#{patchrun_data_dir}/"
+
+  # Write site.yml for this patchrun
+  File.write("#{patchrun_data_dir}/site.yml", site_yml.to_yaml ) # Store
+
+  # load server list (file with one server per line, ignore lines starting with '#')
+  $servers = []
+  if File.file?("#{$basedir}/#{$config['server_list']}")
+    puts "INFO: Reading server list from #{$basedir}/#{$config['server_list']}" if options[:verbose]
+    File.readlines("#{$basedir}/#{$config['server_list']}").each do | line |
+      next if line =~ /^\s*#/ # skip comment
+      puts "DEBUG: #{line}" if options[:debug]
+      $servers << line.chomp
+    end
+  else
+    puts "ERROR: Server list file '#{$config['server_list']}' does not exit!"
+    exit 2
+  end
+
+  if options[:verbose]
+    puts "INFO: Serverlist:"
+    pp $servers
+  end
+
+  # Write servers to hosts file in patchrun ansible directory
+  File.open("#{patchrun_data_dir}/hosts", 'w') { |file|
+    file.write("[nodes]\n")
+    $servers.each do | server |
+      file.write("#{server}\n")
+    end
+  }
+
+  nb_servers = $servers.count # number of server
+  puts "INFO: #{nb_servers} servers found" if options[:verbose]
+  $config['servers_per_patch_run'] = nb_servers if $config['servers_per_patch_run'] == 0 # max
+
+  nb_servers_scheduled = 0 # number of servers scheduled
+  puts "INFO: Looking for patchdays .." if options[:verbose]
+  while (nb_servers_scheduled < nb_servers) # while we have unscheduled servers
+    puts "DEBUG: Check if date #{mydate} (#{ mydate.strftime('%A') }) is a patchday" if options[:debug]
+    if $config['patch_days'].include? mydate.cwday # is today a patchday?
+      # this day is a patchday, so let's schedule patching
+      puts "INFO: We have a winner! #{mydate} (#{ mydate.strftime('%A') }) is a patchday! Let's schedule some happy patching" if options[:verbose]
+      puts "DEBUG: nb_servers_scheduled #{nb_servers_scheduled}" if options[:debug]
+      schedule_patchjob(mydate, $servers[(nb_servers_scheduled)..(nb_servers_scheduled + $config['servers_per_patch_run'] - 1 )], patchrun_data_dir )
+      nb_servers_scheduled += $config['servers_per_patch_run'] # some more servers are scheduled
+    else
+      puts "INFO: Hmm, #{mydate} (#{ mydate.strftime('%A') }) is not a happy patchday! Let's try the next one" if options[:verbose]
+    end
+    mydate += 1 # let's add another day
+  end
+
+  puts "#{patchrun_name_final}"
+end # patchrun_create
+
+#------------------------------------------------------------------------------
+# patchrun_list
+def patchrun_list
+  puts "INFO: patchrun_list" if $config['verbose']
+  patchruns = Dir["#{$data_dir}/*"]
+  patchruns.each do | path |
+    puts "#{File.basename(path)}"
+  end
+end
+
+#------------------------------------------------------------------------------
+# patchrun_info
+def patchrun_info
+  puts "INFO: patchrun_info" if $config['verbose']
+
+  if $config['patchrun_name'].nil? || $config['patchrun_name'].empty?
+    puts "WARN: You must specify an existing patchrun name with -p option"
+    exit 1
+  end
+
+  patchrun_dir = "#{$data_dir}/#{$config['patchrun_name']}"
+  if ! File.exists?(patchrun_dir)
+    puts "WARN: Patchrun directory #{$config['patchrun_name']} does not exist."
+    puts "INFO: Please specify an existing patchrun with -p option."
+    exit 1
+  end
+
+  at_jobs = %x( /usr/bin/atq )
+  # "98\tThu Mar  8 00:15:00 2018 a u225900\n99\tFri Mar  9 00:15:00 2018 a u225900\n100\tTue Mar 13 00:15:00 2018 a u225900\n101\tWed Mar 14 00:15:00 2018 a u225900\n102\tThu Mar 15 00:15:00 2018 a u225900\n103\tFri Mar 16 00:15:00 2018 a u225900\n"
+  at_jobs.split("\n").each do | job |
+    # 98\tThu Mar  8 00:15:00 2018 a u225900
+    (job_id,rest) = job.split("\t")
+    job_info_array = %x( /usr/bin/at -c #{job_id}).split("\n")
+    job_command = job_info_array[-3]
+    cd_dir = job_info_array[-8] # e.g.: cd /home/u225900/workspace/openshift\-patchnix/patchrun\_data/2018\-03\-08 || {
+    cd_dir_cleaned = cd_dir.delete('\\').delete('|').delete('{') # e.g.: cd /home/u225900/workspace/openshift\-patchnix/patchrun_data/2018-03-08
+    puts "DEBUG: cd_dir_cleaned: '#{cd_dir_cleaned}'" if $config['debug']
+    puts "DEBUG: patchrun_name: '#{$config['patchrun_name']}'" if $config['debug']
+    if ( cd_dir_cleaned =~ /#{$config['patchrun_name']}/ )
+      puts "-----------------------------------------------"
+      puts "At job: #{job}"
+      puts "At job command: #{job_command}"
+    else
+      puts "INFO: Job '#{job}' does not belong to patchrun '#{$config['patchrun_name']}'" if $config['debug']
+    end
+  end
+  status_file = "#{patchrun_dir}/logs/statusfile"
+  if File.exists?(status_file)
+    puts "Finished nodes:"
+    puts `cat #{status_file}`
+    puts "-------------------------"
+  else
+    puts "No status file found"
+  end
+  puts "Directory: #{patchrun_dir}"
+  ansible_log = "#{patchrun_dir}/logs/ansible.log"
+  if File.exists?(ansible_log)
+    puts "Logfile: #{ansible_log}"
+    puts `tail -n 10 #{ansible_log}`
+  else
+    puts "No logfile found"
+  end
+end
+
+#------------------------------------------------------------------------------
+# patchrun_delete
+def patchrun_delete
+  puts "INFO: patchrun_delete" if $config['verbose']
+
+  if $config['patchrun_name'].nil? || $config['patchrun_name'].empty?
+    puts "WARN: You must specify an existing patchrun name with -p option"
+    exit 1
+  end
+
+  patchrun_dir = "#{$data_dir}/#{$config['patchrun_name']}"
+  if ! File.exists?(patchrun_dir)
+    puts "WARN: Patchrun directory #{$config['patchrun_name']} does not exist."
+    puts "INFO: Please specify an existing patchrun with -p option."
+    exit 1
+  end
+  puts "INFO: Removing patchrun directory #{patchrun_dir}" if $config['verbose']
+  if patchrun_dir.length < 10
+    puts "WARN: The directory seems to be fishy, won't delete '#{patchrun_dir}'"
+  else
+    FileUtils.rm_rf "#{patchrun_dir}"
+  end
+
+  at_jobs = %x( /usr/bin/atq )
+  # "98\tThu Mar  8 00:15:00 2018 a u225900\n99\tFri Mar  9 00:15:00 2018 a u225900\n100\tTue Mar 13 00:15:00 2018 a u225900\n101\tWed Mar 14 00:15:00 2018 a u225900\n102\tThu Mar 15 00:15:00 2018 a u225900\n103\tFri Mar 16 00:15:00 2018 a u225900\n"
+  at_jobs.split("\n").each do | job |
+    # 98\tThu Mar  8 00:15:00 2018 a u225900
+    (job_id,rest) = job.split("\t")
+    job_info_array = %x( /usr/bin/at -c #{job_id}).split("\n")
+    cd_dir = job_info_array[-8] # e.g.: cd /home/u225900/workspace/openshift\-patchnix/patchrun\_data/2018\-03\-08 || {
+    cd_dir_cleaned = cd_dir.delete('\\').delete('|').delete('{') # e.g.: cd /home/u225900/workspace/openshift\-patchnix/patchrun_data/2018-03-08
+    if ( cd_dir_cleaned =~ /#{$config['patchrun_name']}/ )
+      puts "Removing at job: #{job_id}" if $config['verbose']
+      %x( /usr/bin/atrm #{job_id} )
+    else
+      puts "INFO: Job '#{job}' does not belong to patchrun '#{$config['patchrun_name']}'" if $config['debug']
+    end
+  end
+end
+
+#------------------------------------------------------------------------------
+# patchrun
+def patchrun(option,options)
+  case option
+  when "create"
+    patchrun_create(options)
+  when "list"
+    patchrun_list
+  when "delete"
+    patchrun_delete
+  when /info|status/
+    patchrun_info
+  else
+    puts "ERROR: This shoudl not happen! Invalid option '#{option}'"
+    exit 2
+  end
+end
+#------------------------------------------------------------------------------
+
+patchrun(option,options)
+
+exit 0

@@ -1,0 +1,31 @@
+---
+- block:
+  - name: Check if oc command is working
+    shell: oc get nodes
+    register: oc_status
+    changed_when: false
+
+  - name: Check if all nodes are ready
+    shell: oc get nodes | grep NotReady
+    # root@devmaster01a .kube# oc get nodes
+    # NAME                           STATUS                     AGE
+    # devmaster01a.ose.aws.net   Ready,SchedulingDisabled   20d
+    # devmaster02a.ose.aws.net   Ready,SchedulingDisabled   20d
+    # devnode01a.ose.aws.net     NotReady                   20d
+    # devnode02a.ose.aws.net     Ready                      20d
+    register: notready
+    failed_when: notready.rc == 0
+    check_mode: false
+    changed_when: false
+    ignore_errors: true
+    
+  - name: Check if all nodes are scheduled
+    shell: oc get nodes --selector='purpose=workingnode' | grep SchedulingDisabled
+    register: scheduling
+    failed_when: scheduling.rc == 0
+    #check_mode: false
+    changed_when: false
+    #ignore_errors: true
+    
+  delegate_to: localhost
+  become: true

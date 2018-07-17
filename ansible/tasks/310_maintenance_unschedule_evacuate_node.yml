@@ -1,0 +1,64 @@
+---
+# Playbook to unschedule an OpenShift node
+- block:
+  - name: Unschedule node {{ inventory_hostname }}
+    shell: oc adm manage-node {{ inventory_hostname }} --schedulable=false
+
+  - name: Evacuate prod pods first ({{ inventory_hostname }})
+    shell: oc get pod --all-namespaces -o wide | grep {{ inventory_hostname }} | grep Running | grep -- '{{ production_namespaces_filter }}' | sort -r | awk '{print $2," ",$1 }' | while read -r pod proj; do oc delete pod $pod -n $proj ; sleep 5; done
+
+  - name: Wait for all prod pods to terminate (max 15 minutes)
+    shell: oc get pod --all-namespaces -o wide | grep {{ inventory_hostname }} | grep -- '{{ production_namespaces_filter }}'
+    ignore_errors: yes # is needed because grep will return -1 as soon as there is no prod pod left
+    register: result
+    until: result.stdout.find("Terminating") == -1
+    retries: 60
+    delay: 15
+    failed_when: result.rc >= 2
+    changed_when: false
+
+  - name: Evacuate rest of node {{ inventory_hostname }} (slow mode)
+    shell: oc get pod --all-namespaces -o wide | grep {{ inventory_hostname }} | grep Running | awk '{print $2," ",$1 }' | while read -r pod proj; do oc delete pod $pod -n $proj ; sleep 5; done
+
+  - name: Wait for all pods to terminate (max 30 minutes)
+    shell: oc adm manage-node {{ inventory_hostname }} --list-pods
+    register: result
+    until: result.stdout.find("Terminating") == -1
+    retries: 120
+    delay: 15
+    check_mode: false
+    changed_when: false
+
+  - name: Check again if no pods are running on node {{ inventory_hostname }}
+    shell: oc adm manage-node {{ inventory_hostname }} --list-pods | grep Running | grep -v sematext
+    ignore_errors: yes
+    register: still_running
+    failed_when: still_running.rc >= 2
+    check_mode: false
+    changed_when: false
+
+  - name: Evacuate node {{ inventory_hostname }} again if there are still some pods running
+    shell: oc get pod --all-namespaces -o wide | grep {{ inventory_hostname }} | grep Running | awk '{print $2," ",$1 }' | while read -r pod proj; do oc delete pod $pod -n $proj ; sleep 5; done
+    when: still_running.stdout != ''
+
+  - name: Wait once more for all pods to terminate if there are some still running (max 5 minutes)
+    shell: oc adm manage-node {{ inventory_hostname }} --list-pods
+    register: result
+    until: result.stdout.find("Terminating") == -1
+    retries: 30
+    delay: 10
+    when: still_running.stdout != ''
+    check_mode: false
+    changed_when: false
+  delegate_to: localhost
+  connection: local
+  become: true
+
+- name: Check if most docker containers are terminated
+  shell: docker ps -q | wc -l
+  register: docker_wc
+  failed_when: docker_wc.stdout | int > 10
+  check_mode: true
+  become: true
+  changed_when: false
+

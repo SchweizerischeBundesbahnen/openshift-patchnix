@@ -1,0 +1,54 @@
+---
+- hosts: all
+  become: true
+  serial: 1
+  vars: # default vars if not set
+    patch_window_start: '00:00:00'
+    patch_window_end: '23:59:59'
+    servers_per_patch_run: 2
+    wait_seconds_between_servers: 300
+    force_reboot: false
+    production_namespaces_filter: '-prod'
+
+  tasks:
+  - include_tasks: tasks/001_prep_variables.yml
+  - include_tasks: tasks/005_precheck_patchwindow.yml
+
+  ### for i in `ls -1 tasks/*` ; do echo "  #- include_tasks: ${i}"; done
+  - include_tasks: tasks/010_precheck_cluster_status.yml
+  - include_tasks: tasks/020_precheck_cluster_capacity.yml
+  #- include_tasks: tasks/110_inform_email.yml
+  #- include_tasks: tasks/120_inform_rocketchat.yml
+  #- include_tasks: tasks/130_inform_jira.yml
+  #- include_tasks: tasks/210_alarm_viktorops.yml
+  #- include_tasks: tasks/220_alarm_newrelic.yml
+  #- include_tasks: tasks/230_alarm_checkmk.yml
+  #- include_tasks: tasks/231_alarm_icinga.yml
+  #- include_tasks: tasks/232_alarm_nagios.yml
+  #- include_tasks: tasks/240_alarm_zabbix.yml
+  #- include_tasks: tasks/310_maintenance_unschedule_evacuate_node.yml
+  #- include_tasks: tasks/410_config_changes.yml
+  #- include_tasks: tasks/420_config_yum_repositories.yml
+  #- include_tasks: tasks/510_upgrade_os_only.yml
+  #- include_tasks: tasks/520_upgrade_all.yml
+  #- include_tasks: tasks/599_reboot.yml
+  #- include_tasks: tasks/600_checkup_server_up.yml
+  #- include_tasks: tasks/610_checkup_services_up.yml
+  #- include_tasks: tasks/630_checkup_logfiles.yml
+  #- include_tasks: tasks/680_checkup_schedule_node.yml
+  #- include_tasks: tasks/690_checkup_pods_running.yml
+  #- include_tasks: tasks/710_inform_email.yml
+  #- include_tasks: tasks/720_inform_rocketchat.yml
+  #- include_tasks: tasks/730_inform_jira.yml
+  #- include_tasks: tasks/810_alarm_viktorops.yml
+  #- include_tasks: tasks/820_alarm_newrelic.yml
+  #- include_tasks: tasks/830_alarm_checkmk.yml
+  #- include_tasks: tasks/831_alarm_icinga.yml
+  #- include_tasks: tasks/832_alarm_nagios.yml
+  #- include_tasks: tasks/840_alarm_zabbix.yml
+  - include_tasks: tasks/985_post_add_host_to_statusfile.yml
+  - include_tasks: tasks/990_post_wait.yml
+
+  handlers:
+  - import_tasks: handlers/main.yml
+

@@ -1,0 +1,9 @@
+---
+- name: Send notification message via Rocket Chat
+  rocketchat:
+    token: "{{ rocketchat_token }}"
+    domain: "{{ rocketchat_domain }}"
+    channel: "{{ rocketchat_channel }}"
+    username: "{{ rocketchat_username }}"
+    msg: 'OpenShift Cluster maintenance finished successfully on node {{ inventory_hostname }}'
+  delegate_to: localhost

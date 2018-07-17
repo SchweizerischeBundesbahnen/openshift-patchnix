@@ -1,0 +1,26 @@
+---
+- block:
+  - name: Make sure /root/bin exists
+    file:
+      path: /root/bin
+      state: directory
+      owner: root
+      group: root
+      mode: 0750    
+
+  - name: Install cluster capacity check tool on the first master
+    copy:
+      src: files/get_pods_per_node_capacity.sh
+      dest: /root/bin/get_pods_per_node_capacity.sh
+      owner: root
+      group: root
+      mode: 0750
+
+  - name: Install package bc as dependency for the cluster capacity check tool
+    yum:
+      name: bc
+      state: present
+
+  delegate_to: localhost
+  connection: local
+  become: true

@@ -5,14 +5,14 @@
     state: installed
 
 - name: Check for reboot hint
-  command: needs-restarting -r 
+  command: needs-restarting -r
   ignore_errors: true
   register: reboot_hint
   check_mode: false
   changed_when: false
 
 - debug:
-  var: force_reboot
+    var: force_reboot
 
 - name: Reboot
   shell: sleep 2 && /usr/sbin/shutdown -r now "Reboot required for updated kernel or libraries"

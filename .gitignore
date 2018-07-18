@@ -1,0 +1,3 @@
+ansible/logs/*
+ansible/*.retry
+patchrun_data/*

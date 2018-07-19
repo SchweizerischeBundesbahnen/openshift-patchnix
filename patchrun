@@ -249,6 +249,8 @@ def patchrun_create(options)
 
   # Copy entire ansible directory to patchrun directory
   FileUtils.cp_r Dir.glob("#{$basedir}/ansible/*"), "#{patchrun_data_dir}/"
+  # Remove all files in logs folder to get a clean start
+  FileUtils.rm Dir.glob("#{patchrun_data_dir}/logs/*"), :force => true
 
   # Write site.yml for this patchrun
   File.write("#{patchrun_data_dir}/site.yml", site_yml.to_yaml ) # Store
